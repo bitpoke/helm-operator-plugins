@@ -18,6 +18,7 @@ package updater
 
 import (
 	"context"
+	"maps"
 
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
@@ -98,7 +99,10 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
 		if err != nil {
 			return err
 		}
-		obj.Object["status"] = uSt
+		if obj.Object["status"] == nil {
+			obj.Object["status"] = map[string]any{}
+		}
+		maps.Copy(obj.Object["status"].(map[string]any), uSt)
 
 		if err := retryOnRetryableUpdateError(backoff, func() error {
 			return u.client.Status().Update(ctx, obj)
