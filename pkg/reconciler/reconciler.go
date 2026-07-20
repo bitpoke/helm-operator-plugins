@@ -83,6 +83,7 @@ type Reconciler struct {
 	maxReleaseHistory                *int
 	skipPrimaryGVKSchemeRegistration bool
 	controllerSetupFuncs             []ControllerSetupFunc
+	predicates                       []predicate.Predicate
 	pauseHandler                     PauseReconcileHandlerFunc
 
 	annotSetupOnce       sync.Once
@@ -528,6 +529,16 @@ func WithValueMapper(m values.Mapper) Option {
 func WithSelector(s metav1.LabelSelector) Option {
 	return func(r *Reconciler) error {
 		r.labelSelector = s
+		return nil
+	}
+}
+
+// WithPredicates configures additional event predicates for the reconciler's
+// watches. These predicates are applied together with the label selector
+// configured through WithSelector, if any.
+func WithPredicates(preds ...predicate.Predicate) Option {
+	return func(r *Reconciler) error {
+		r.predicates = append(r.predicates, preds...)
 		return nil
 	}
 }
@@ -1023,7 +1034,7 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(*r.gvk)
 
-	var preds []predicate.Predicate
+	preds := make([]predicate.Predicate, 0, len(r.predicates)+1)
 
 	if r.labelSelector.Size() > 0 {
 		selectorPredicate, err := predicate.LabelSelectorPredicate(r.labelSelector)
@@ -1032,6 +1043,7 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 		}
 		preds = append(preds, selectorPredicate)
 	}
+	preds = append(preds, r.predicates...)
 
 	if err := c.Watch(
 		source.Kind(

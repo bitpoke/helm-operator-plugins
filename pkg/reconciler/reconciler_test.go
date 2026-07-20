@@ -469,6 +469,27 @@ var _ = Describe("Reconciler", func() {
 				Expect(selectorPredicate.Generic(event.GenericEvent{Object: objUnlabeled})).To(BeFalse())
 			})
 		})
+		_ = Describe("WithPredicates", func() {
+			It("should append custom predicates", func() {
+				createPredicate := predicate.Funcs{
+					CreateFunc: func(event.CreateEvent) bool {
+						return true
+					},
+				}
+				updatePredicate := predicate.Funcs{
+					UpdateFunc: func(event.UpdateEvent) bool {
+						return false
+					},
+				}
+
+				Expect(WithPredicates(createPredicate)(r)).To(Succeed())
+				Expect(WithPredicates(updatePredicate)(r)).To(Succeed())
+
+				Expect(r.predicates).To(HaveLen(2))
+				Expect(r.predicates[0].Create(event.CreateEvent{Object: &unstructured.Unstructured{}})).To(BeTrue())
+				Expect(r.predicates[1].Update(event.UpdateEvent{ObjectOld: &unstructured.Unstructured{}, ObjectNew: &unstructured.Unstructured{}})).To(BeFalse())
+			})
+		})
 	})
 
 	_ = Describe("Reconcile", func() {
