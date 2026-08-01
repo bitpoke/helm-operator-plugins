@@ -70,6 +70,7 @@ import (
 	"github.com/operator-framework/helm-operator-plugins/pkg/internal/testutil"
 	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/conditions"
 	helmfake "github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/fake"
+	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/updater"
 	"github.com/operator-framework/helm-operator-plugins/pkg/values"
 )
 
@@ -245,6 +246,56 @@ var _ = Describe("Reconciler", func() {
 			})
 			It("should fail if value is less than 0", func() {
 				Expect(WithMaxReleaseHistory(-1)(r)).NotTo(Succeed())
+			})
+		})
+		_ = Describe("WithTakeOwnership", func() {
+			It("should configure Helm resource adoption", func() {
+				Expect(WithTakeOwnership(true)(r)).To(Succeed())
+				Expect(r.takeOwnership).To(BeTrue())
+			})
+			It("should allow disabling Helm resource adoption", func() {
+				Expect(WithTakeOwnership(false)(r)).To(Succeed())
+				Expect(r.takeOwnership).To(BeFalse())
+			})
+			It("should configure installs and upgrades to adopt existing resources", func() {
+				r.takeOwnership = true
+				r.maxReleaseHistory = ptr.To(10)
+				obj := &unstructured.Unstructured{}
+				obj.SetName("test")
+
+				ac := helmfake.NewActionClient()
+				ac.HandleInstall = func() (*release.Release, error) { return &release.Release{}, nil }
+				_, err := r.doInstall(&ac, &updater.Updater{}, obj, nil, logr.Discard())
+				Expect(err).NotTo(HaveOccurred())
+
+				install := &action.Install{}
+				for _, opt := range ac.Installs[0].Opts {
+					Expect(opt(install)).To(Succeed())
+				}
+				Expect(install.TakeOwnership).To(BeTrue())
+
+				ac.HandleGet = func() (*release.Release, error) { return &release.Release{}, nil }
+				ac.HandleUpgrade = func() (*release.Release, error) { return &release.Release{}, nil }
+				_, err = r.doUpgrade(&ac, &updater.Updater{}, obj, nil, logr.Discard())
+				Expect(err).NotTo(HaveOccurred())
+
+				upgrade := &action.Upgrade{}
+				for _, opt := range ac.Upgrades[0].Opts {
+					Expect(opt(upgrade)).To(Succeed())
+				}
+				Expect(upgrade.TakeOwnership).To(BeTrue())
+
+				ac.HandleGet = func() (*release.Release, error) {
+					return &release.Release{Info: &release.Info{}}, nil
+				}
+				_, _, err = r.getReleaseState(&ac, obj, nil)
+				Expect(err).NotTo(HaveOccurred())
+
+				dryRunUpgrade := &action.Upgrade{}
+				for _, opt := range ac.Upgrades[1].Opts {
+					Expect(opt(dryRunUpgrade)).To(Succeed())
+				}
+				Expect(dryRunUpgrade.TakeOwnership).To(BeTrue())
 			})
 		})
 		_ = Describe("WithInstallAnnotations", func() {

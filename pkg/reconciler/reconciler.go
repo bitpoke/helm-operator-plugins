@@ -81,6 +81,7 @@ type Reconciler struct {
 	reconcilePeriod                  time.Duration
 	waitForDeletionTimeout           time.Duration
 	maxReleaseHistory                *int
+	takeOwnership                    bool
 	skipPrimaryGVKSchemeRegistration bool
 	controllerSetupFuncs             []ControllerSetupFunc
 	predicates                       []predicate.Predicate
@@ -374,6 +375,18 @@ func WithMaxReleaseHistory(maxHistory int) Option {
 			return errors.New("maximum Helm release history size must not be negative")
 		}
 		r.maxReleaseHistory = &maxHistory
+		return nil
+	}
+}
+
+// WithTakeOwnership configures Helm to adopt existing resources that are not
+// marked as managed by Helm. This applies to installs and upgrades, including
+// the dry-run upgrade used to determine release state.
+//
+// Disabled by default.
+func WithTakeOwnership(takeOwnership bool) Option {
+	return func(r *Reconciler) error {
+		r.takeOwnership = takeOwnership
 		return nil
 	}
 }
@@ -822,6 +835,12 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 	}
 
 	var opts []helmclient.UpgradeOption
+	if r.takeOwnership {
+		opts = append(opts, func(u *action.Upgrade) error {
+			u.TakeOwnership = true
+			return nil
+		})
+	}
 	if *r.maxReleaseHistory > 0 {
 		opts = append(opts, func(u *action.Upgrade) error {
 			u.MaxHistory = *r.maxReleaseHistory
@@ -852,6 +871,12 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 
 func (r *Reconciler) doInstall(actionClient helmclient.ActionInterface, u *updater.Updater, obj *unstructured.Unstructured, vals map[string]interface{}, log logr.Logger) (*release.Release, error) {
 	var opts []helmclient.InstallOption
+	if r.takeOwnership {
+		opts = append(opts, func(i *action.Install) error {
+			i.TakeOwnership = true
+			return nil
+		})
+	}
 	for name, annot := range r.installAnnotations {
 		if v, ok := obj.GetAnnotations()[name]; ok {
 			opts = append(opts, annot.InstallOption(v))
@@ -879,6 +904,12 @@ func (r *Reconciler) doInstall(actionClient helmclient.ActionInterface, u *updat
 
 func (r *Reconciler) doUpgrade(actionClient helmclient.ActionInterface, u *updater.Updater, obj *unstructured.Unstructured, vals map[string]interface{}, log logr.Logger) (*release.Release, error) {
 	var opts []helmclient.UpgradeOption
+	if r.takeOwnership {
+		opts = append(opts, func(u *action.Upgrade) error {
+			u.TakeOwnership = true
+			return nil
+		})
+	}
 	if *r.maxReleaseHistory > 0 {
 		opts = append(opts, func(u *action.Upgrade) error {
 			u.MaxHistory = *r.maxReleaseHistory
